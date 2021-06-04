@@ -1189,9 +1189,10 @@ static const char *checked_dev_name(const struct device *dev)
 	if (likely(!blk_trace_note_message_enabled((bfqd)->queue)))	\
 		break;							\
 	bfq_pid_to_str((bfqq)->pid, pid_str, MAX_PID_STR_LENGTH, bfqq); \
-	blk_add_trace_msg((bfqd)->queue, "bfq%s%c %s [%s] " fmt, \
+	blk_add_trace_msg((bfqd)->queue, "bfq%s%c%u %s [%s] " fmt, \
 			  pid_str,				\
 			  bfq_bfqq_sync((bfqq)) ? 'S' : 'A',    \
+			  bfqq->actuator_idx,				\
 			  bfqq_group(bfqq)->blkg_path, __func__, ##args); \
 	} while (0)
 
@@ -1209,8 +1210,9 @@ static const char *checked_dev_name(const struct device *dev)
 	if (likely(!blk_trace_note_message_enabled((bfqd)->queue)))	\
 		break;							\
 	bfq_pid_to_str((bfqq)->pid, pid_str, MAX_PID_STR_LENGTH, bfqq); \
-	blk_add_trace_msg((bfqd)->queue, "bfq%s%c [%s] " fmt, pid_str, \
+	blk_add_trace_msg((bfqd)->queue, "bfq%s%c%u [%s] " fmt, pid_str, \
 			  bfq_bfqq_sync((bfqq)) ? 'S' : 'A',	\
+			  bfqq->actuator_idx,				\
 			  __func__, ##args);			\
 	} while (0)
 #define bfq_log_bfqg(bfqd, bfqg, fmt, args...)          do {} while (0)
