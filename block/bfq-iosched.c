@@ -6891,12 +6891,18 @@ static void bfq_insert_request(struct blk_mq_hw_ctx *hctx, struct request *rq,
 		rq->rq_flags |= RQF_DISP_LIST;
 		if (bfqq)
 			bfq_log_bfqq(bfqd, bfqq,
-				     "%p in disp: at_head %d",
-				     rq, at_head);
+"%p in disp: at_head %d serv_q %p tot_busy_qs %u busy_q %d waker_q %p serv_q_waker %p",
+				     rq, at_head, bfqd->in_service_queue,
+				     bfq_tot_busy_queues(bfqd),
+				     bfq_bfqq_busy(bfqq),
+				     bfqq->waker_bfqq,
+				     bfqd->in_service_queue->waker_bfqq);
 		else
 			bfq_log(bfqd,
-				"%p in disp: at_head %d",
-				rq, at_head);
+	     "%p in disp: at_head %d serv_q %p tot_busy_qs %u serv_q_waker %p",
+				rq, at_head, bfqd->in_service_queue,
+				bfq_tot_busy_queues(bfqd),
+				bfqd->in_service_queue->waker_bfqq);
 	} else {
 		BFQ_BUG_ON(!bfqq);
 		BFQ_BUG_ON(!(rq->rq_flags & RQF_GOT));
