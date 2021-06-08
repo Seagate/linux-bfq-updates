@@ -1122,6 +1122,8 @@ static void
 bfq_bfqq_resume_state(struct bfq_queue *bfqq, struct bfq_data *bfqd,
 		      struct bfq_io_cq *bic, bool bfq_already_existing)
 {
+	return;
+#if 0
 	unsigned int old_wr_coeff = 1;
 	bool busy = bfq_already_existing && bfq_bfqq_busy(bfqq);
 
@@ -1196,6 +1198,7 @@ bfq_bfqq_resume_state(struct bfq_queue *bfqq, struct bfq_data *bfqd,
 		bfqd->wr_busy_queues--;
 		BFQ_BUG_ON(bfqd->wr_busy_queues < 0);
 	}
+#endif
 }
 
 static int bfqq_process_refs(struct bfq_queue *bfqq)
@@ -3047,7 +3050,7 @@ bfq_setup_cooperator(struct bfq_data *bfqd, struct bfq_queue *bfqq,
 	struct bfq_queue *in_service_bfqq, *new_bfqq;
 
 	BFQ_BUG_ON(!bic);
-
+	return NULL;
 	/*
 	 * Check delayed stable merge for rotational or non-queueing
 	 * devs. For this branch to be executed, bfqq must not be
@@ -3215,6 +3218,8 @@ bfq_setup_cooperator(struct bfq_data *bfqd, struct bfq_queue *bfqq,
 
 static void bfq_bfqq_save_state(struct bfq_queue *bfqq)
 {
+	return;
+#if 0
 	struct bfq_io_cq *bic = bfqq->bic;
 
 	/*
@@ -3268,6 +3273,7 @@ static void bfq_bfqq_save_state(struct bfq_queue *bfqq)
 		     "bic %p wr_coeff %d start_finish %lu max_time %lu",
 		     bic, bfqq->wr_coeff, bfqq->last_wr_start_finish,
 		     bfqq->wr_cur_max_time);
+#endif
 }
 
 void bfq_release_process_ref(struct bfq_data *bfqd, struct bfq_queue *bfqq)
@@ -5947,6 +5953,7 @@ static void bfq_exit_icq(struct io_cq *icq)
 {
 	struct bfq_io_cq *bic = icq_to_bic(icq);
 
+#if 0
 	BFQ_BUG_ON(!bic);
 	if (bic->stable_merge_bfqq) {
 		unsigned long flags;
@@ -5961,7 +5968,7 @@ static void bfq_exit_icq(struct io_cq *icq)
 		if (bfqd)
 			spin_unlock_irqrestore(&bfqd->lock, flags);
 	}
-
+#endif
 	bfq_exit_icq_bfqq(bic, true);
 	bfq_exit_icq_bfqq(bic, false);
 }
@@ -6243,6 +6250,8 @@ static struct bfq_queue *bfq_do_or_sched_stable_merge(struct bfq_data *bfqd,
 						      struct bfq_queue *bfqq,
 						      struct bfq_io_cq *bic)
 {
+	return NULL;
+#if 0
 	struct bfq_queue **source_bfqq = bfqq->entity.parent ?
 		&bfqq->entity.parent->last_bfqq_created :
 		&bfqd->last_bfqq_created;
@@ -6334,6 +6343,7 @@ static struct bfq_queue *bfq_do_or_sched_stable_merge(struct bfq_data *bfqd,
 	}
 
 	return bfqq;
+#endif
 }
 
 
@@ -6403,13 +6413,13 @@ out:
 	bfqq->proc_ref++; /* get a process reference to this queue */
 	bfqq->ref++; /* get a process reference to this queue */
 	bfq_log_bfqq(bfqd, bfqq, "initial refs: %p, %d", bfqq, bfqq->ref);
-
+#if 0
 	if (bfqq != &bfqd->oom_bfqq && is_sync && !respawn) {
 		BFQ_BUG_ON(bfqq == bic_to_bfqq(bic, false));
 
 		bfqq = bfq_do_or_sched_stable_merge(bfqd, bfqq, bic);
 	}
-
+#endif
 	rcu_read_unlock();
 	return bfqq;
 }
