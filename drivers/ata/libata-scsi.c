@@ -1082,6 +1082,19 @@ int ata_scsi_dev_config(struct scsi_device *sdev, struct ata_device *dev)
 	if (dev->flags & ATA_DFLAG_TRUSTED)
 		sdev->security_supported = 1;
 
+	/* Temporary; to be replaced with SAT translation */
+	if (dev->num_pos_ranges) {
+		q->lba_ranges = kzalloc(dev->num_pos_ranges * sizeof(sector_t),
+					GFP_NOIO);
+		if (q->lba_ranges) {
+			int i;
+			sector_t lbs = sdev->sector_size >> SECTOR_SHIFT;
+
+			for (i = 0; i < dev->num_pos_ranges; i++)
+				q->lba_ranges[i] = dev->pos_ranges[i] * lbs;
+			q->num_lba_ranges = dev->num_pos_ranges;
+		}
+	}
 	dev->sdev = sdev;
 	return 0;
 }

@@ -498,6 +498,8 @@ struct request_queue {
 	struct queue_limits	limits;
 
 	unsigned int		required_elevator_features;
+	unsigned int		num_lba_ranges;
+	sector_t		*lba_ranges;
 
 #ifdef CONFIG_BLK_DEV_ZONED
 	/*
@@ -1485,6 +1487,21 @@ static inline unsigned int
 bdev_zone_write_granularity(struct block_device *bdev)
 {
 	return queue_zone_write_granularity(bdev_get_queue(bdev));
+}
+
+static inline unsigned int
+queue_lba_range_index(struct request_queue *q, sector_t lba)
+{
+	int i = 0, idx = 0;
+
+	while (i < q->num_lba_ranges) {
+		if (q->lba_ranges[i] <= lba)
+			idx = i;
+		else
+			break;
+		i++;
+	}
+	return idx;
 }
 
 static inline int queue_alignment_offset(const struct request_queue *q)
