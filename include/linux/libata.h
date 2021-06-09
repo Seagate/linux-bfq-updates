@@ -729,6 +729,10 @@ struct ata_device {
 	u32			zac_zones_optimal_nonseq;
 	u32			zac_zones_max_open;
 
+	/* Multi-actuator configuration */
+	u64			*pos_ranges;
+	int			num_pos_ranges;
+
 	/* error history */
 	int			spdn_cnt;
 	/* ering is CLEAR_END, read comment above CLEAR_END */

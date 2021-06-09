@@ -2363,6 +2363,70 @@ static void ata_dev_config_trusted(struct ata_device *dev)
 		dev->flags |= ATA_DFLAG_TRUSTED;
 }
 
+static void ata_dev_config_multi_actuator(struct ata_device *dev)
+{
+	struct ata_port *ap = dev->link->ap;
+	size_t pos_range_size;
+	u8 *range_desc;
+	unsigned int err;
+	int i;
+
+	if (!ata_log_supported(dev, ATA_LOG_CONCURRENT_POS)) {
+		dev->num_pos_ranges = 0;
+		return;
+	}
+
+	err = ata_read_log_page(dev, ATA_LOG_CONCURRENT_POS, 0,
+			ap->sector_buf, 1);
+	if (err) {
+		dev->num_pos_ranges = 0;
+		ata_dev_dbg(dev,
+			    "failed to read Concurrent Positioning Ranges Log,"
+			    " Emask 0x%x\n", err);
+		return;
+	}
+
+	dev->num_pos_ranges = ap->sector_buf[0];
+	if (dev->num_pos_ranges == 0)
+		/* no range, nothing to be configured */
+		return;
+	if (WARN_ON(dev->num_pos_ranges > 64)) {
+		/* Invalid number of ranges, do not configure anything */
+		dev->num_pos_ranges = 0;
+		return;
+	}
+	ata_dev_info(dev, "found %d concurrent positioning ranges\n",
+		     dev->num_pos_ranges);
+
+	pos_range_size = sizeof(unsigned long) * dev->num_pos_ranges;
+	dev->pos_ranges = kmalloc(pos_range_size, GFP_NOIO);
+	if (!dev->pos_ranges) {
+		ata_dev_err(dev,
+			    "positioning ranges buffer allocation failed\n");
+		dev->pos_ranges = 0;
+		return;
+	}
+	range_desc = &ap->sector_buf[64];
+	for (i = 0; i < dev->num_pos_ranges; i++) {
+		u64 range_start, range_count;
+		u64 range_mask = ~((u64)0xFFFF << 48);
+
+		range_start = get_unaligned_le64(&range_desc[8]) & range_mask;
+		range_count = get_unaligned_le64(&range_desc[16]);
+		dev->pos_ranges[i] = range_start;
+		ata_dev_info(dev,
+			     "pos range [%d]: start %llx count %llx\n",
+			     i, range_start, range_count);
+		range_desc += 32;
+	}
+	if (dev->pos_ranges[0] != 0) {
+		ata_dev_err(dev,
+			    "positioning ranges do not start with LBA 0\n");
+		kfree(dev->pos_ranges);
+		dev->num_pos_ranges = 0;
+	}
+}
+
 /**
  *	ata_dev_configure - Configure the specified ATA/ATAPI device
  *	@dev: Target device to configure
@@ -2591,6 +2655,7 @@ int ata_dev_configure(struct ata_device *dev)
 		ata_dev_config_sense_reporting(dev);
 		ata_dev_config_zac(dev);
 		ata_dev_config_trusted(dev);
+		ata_dev_config_multi_actuator(dev);
 		dev->cdb_len = 32;
 	}
 
