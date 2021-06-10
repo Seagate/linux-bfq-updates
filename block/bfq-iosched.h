@@ -34,6 +34,8 @@
  */
 #define BFQ_SOFTRT_WEIGHT_FACTOR	100
 
+#define BFQ_NUM_ACTUATORS 2
+
 struct bfq_entity;
 
 /**
@@ -402,6 +404,8 @@ struct bfq_queue {
 	 * the woken queues when this queue exits.
 	 */
 	struct hlist_head woken_list;
+	/*A queue is associated to a specific actuator.*/
+	unsigned int actuator_idx;
 };
 
 /**
@@ -410,17 +414,24 @@ struct bfq_queue {
 struct bfq_io_cq {
 	/* associated io_cq structure */
 	struct io_cq icq; /* must be the first member */
-	/* array of two process queues, the sync and the async */
-	struct bfq_queue *bfqq[2];
+	/*
+	 * Matrix of process queues, the sync and the async on rows
+	 * and the number of queues that have a sync/async pair
+	 * associated on columns. Each bfq_queue s/a pair works
+	 * for a specific actuator in dual actuator drives.
+	 */
+	struct bfq_queue *bfqq[2][BFQ_NUM_ACTUATORS];
 	/* per (request_queue, blkcg) ioprio */
 	int ioprio;
 #ifdef CONFIG_BFQ_GROUP_IOSCHED
 	uint64_t blkcg_serial_nr; /* the current blkcg serial */
 #endif
 	/*
-	 * Snapshot of the has_short_time flag before merging; taken
-	 * to remember its value while the queue is merged, so as to
+	 * Snapshot of the has_short_time flags before merging; taken
+	 * to remember their values while a queue is merged, so as to
 	 * be able to restore it in case of split.
+	 * As the merging may happen for a specific actuator, the
+	 * value must be stored for the right queue index.
 	 */
 	bool saved_has_short_ttime;
 	/*
@@ -433,7 +444,7 @@ struct bfq_io_cq {
 	u64 saved_tot_idle_time;
 
 	/*
-	 * Same purpose as the previous fields for the value of the
+	 * Same purpose as the previous fields for the values of the
 	 * field keeping the queue's belonging to a large burst
 	 */
 	bool saved_in_large_burst;
@@ -971,8 +982,10 @@ struct bfq_queue *bfq_entity_to_bfqq(struct bfq_entity *entity);
 
 extern const int bfq_timeout;
 
-struct bfq_queue *bic_to_bfqq(struct bfq_io_cq *bic, bool is_sync);
-void bic_set_bfqq(struct bfq_io_cq *bic, struct bfq_queue *bfqq, bool is_sync);
+struct bfq_queue *bic_to_bfqq(struct bfq_io_cq *bic, bool is_sync,
+				unsigned int actuator_idx);
+void bic_set_bfqq(struct bfq_io_cq *bic, struct bfq_queue *bfqq, bool is_sync,
+				unsigned int actuator_idx);
 struct bfq_data *bic_to_bfqd(struct bfq_io_cq *bic);
 void bfq_pos_tree_add_move(struct bfq_data *bfqd, struct bfq_queue *bfqq);
 void bfq_weights_tree_add(struct bfq_data *bfqd, struct bfq_queue *bfqq,
