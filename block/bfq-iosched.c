@@ -2515,6 +2515,15 @@ static sector_t get_sdist(sector_t last_pos, struct request *rq)
 	return 0;
 }
 
+unsigned int get_tot_req(struct bfq_data *bfqd)
+{
+	unsigned int tot = 0, i;
+
+	for (i = 0; i < BFQ_NUM_ACTUATORS; i++)
+		tot += bfqd->rq_in_driver[i];
+	return tot;
+}
+
 #if 0 /* Still not clear if we can do without next two functions */
 static void bfq_activate_request(struct request_queue *q, struct request *rq)
 {
@@ -2522,6 +2531,8 @@ static void bfq_activate_request(struct request_queue *q, struct request *rq)
 	unsigned int act_idx;
 
 	act_idx = bfq_actuator_index(bfqd, rq->bio);
+	BFQ_BUG_ON(bfqd->tot_rq_in_driver != get_tot_req(bfqd));
+
 	bfqd->tot_rq_in_driver++;
 	bfqd->rq_in_driver[act_idx]++;
 }
@@ -2532,6 +2543,8 @@ static void bfq_deactivate_request(struct request_queue *q, struct request *rq)
 	unsigned int act_idx;
 
 	BFQ_BUG_ON(bfqd->tot_rq_in_driver == 0);
+	BFQ_BUG_ON(bfqd->tot_rq_in_driver != get_tot_req(bfqd));
+
 	act_idx = bfq_actuator_index(bfqd, rq->bio);
 	bfqd->tot_rq_in_driver--;
 	bfqd->rq_in_driver[act_idx]--;
@@ -5758,6 +5771,7 @@ static struct request *__bfq_dispatch_request(struct blk_mq_hw_ctx *hctx)
 
 	if (rq) {
 inc_in_driver_start_rq:
+		BFQ_BUG_ON(bfqd->tot_rq_in_driver != get_tot_req(bfqd));
 		bfqd->rq_in_driver[bfqq->actuator_idx]++;
 		bfqd->tot_rq_in_driver++;
 start_rq:
@@ -7065,6 +7079,8 @@ static void bfq_completed_request(struct bfq_queue *bfqq, struct bfq_data *bfqd)
 
 	BFQ_BUG_ON(!bfqd->tot_rq_in_driver);
 	BFQ_BUG_ON(!bfqq->dispatched);
+	BFQ_BUG_ON(bfqd->tot_rq_in_driver != get_tot_req(bfqd));
+
 	bfqd->rq_in_driver[bfqq->actuator_idx]--;
 	bfqd->tot_rq_in_driver--;
 
