@@ -2343,8 +2343,8 @@ static void bfq_add_request(struct request *rq)
 			msecs_to_jiffies(100)));
 
 		bfq_log_bfqq(bfqd, bfqq,
-		"limit %u rq_in_driver %d rqs_injected %d",
-		bfqq->inject_limit, bfqd->rq_in_driver, bfqd->rqs_injected);
+		"limit %u tot_rq_in_driver %d rqs_injected %d",
+		bfqq->inject_limit, bfqd->tot_rq_in_driver, bfqd->rqs_injected);
 
 		bfq_check_waker(bfqd, bfqq, now_ns);
 
@@ -2384,9 +2384,9 @@ static void bfq_add_request(struct request *rq)
 		 *   elapsed.
 		 */
 		if (bfqq == bfqd->in_service_queue &&
-		    (bfqd->rq_in_driver == 0 ||
+		    (bfqd->tot_rq_in_driver == 0 ||
 		     (bfqq->last_serv_time_ns > 0 &&
-		      bfqd->rqs_injected && bfqd->rq_in_driver > 0)) &&
+		      bfqd->rqs_injected && bfqd->tot_rq_in_driver > 0)) &&
 		    time_is_before_eq_jiffies(bfqq->decrease_time_jif +
 					      msecs_to_jiffies(10))) {
 			bfqd->last_empty_occupied_ns = ktime_get_ns();
@@ -2410,7 +2410,7 @@ static void bfq_add_request(struct request *rq)
 			 * will be set in case injection is performed
 			 * on bfqq before rq is completed).
 			 */
-			if (bfqd->rq_in_driver == 0)
+			if (bfqd->tot_rq_in_driver == 0)
 				bfqd->rqs_injected = false;
 			bfq_log_bfqq(bfqd, bfqq, "start limit update");
 		}
@@ -2519,16 +2519,22 @@ static sector_t get_sdist(sector_t last_pos, struct request *rq)
 static void bfq_activate_request(struct request_queue *q, struct request *rq)
 {
 	struct bfq_data *bfqd = q->elevator->elevator_data;
+	unsigned int act_idx;
 
-	bfqd->rq_in_driver++;
+	act_idx = bfq_actuator_index(bfqd, rq->bio);
+	bfqd->tot_rq_in_driver++;
+	bfqd->rq_in_driver[act_idx]++;
 }
 
 static void bfq_deactivate_request(struct request_queue *q, struct request *rq)
 {
 	struct bfq_data *bfqd = q->elevator->elevator_data;
+	unsigned int act_idx;
 
-	BFQ_BUG_ON(bfqd->rq_in_driver == 0);
-	bfqd->rq_in_driver--;
+	BFQ_BUG_ON(bfqd->tot_rq_in_driver == 0);
+	act_idx = bfq_actuator_index(bfqd, rq->bio);
+	bfqd->tot_rq_in_driver--;
+	bfqd->rq_in_driver[act_idx]--;
 }
 #endif
 
@@ -2870,11 +2876,14 @@ void bfq_end_wr_async_queues(struct bfq_data *bfqd,
 static void bfq_end_wr(struct bfq_data *bfqd)
 {
 	struct bfq_queue *bfqq;
+	int i;
 
 	spin_lock_irq(&bfqd->lock);
 
-	list_for_each_entry(bfqq, &bfqd->active_list, bfqq_list)
-		bfq_bfqq_end_wr(bfqq);
+	for (i = 0; i < BFQ_NUM_ACTUATORS; i++) {
+		list_for_each_entry(bfqq, &bfqd->active_list[i], bfqq_list)
+			bfq_bfqq_end_wr(bfqq);
+	}
 	list_for_each_entry(bfqq, &bfqd->idle_list, bfqq_list)
 		bfq_bfqq_end_wr(bfqq);
 	bfq_end_wr_async(bfqd);
@@ -3934,7 +3943,7 @@ static void bfq_update_peak_rate(struct bfq_data *bfqd, struct request *rq)
 	 * - start a new observation interval with this dispatch
 	 */
 	if (now_ns - bfqd->last_dispatch > 100*NSEC_PER_MSEC &&
-	    bfqd->rq_in_driver == 0) {
+	    bfqd->tot_rq_in_driver == 0) {
 		bfq_log(bfqd,
 "jumping to updating&resetting delta_last %lluus samples %d",
 			(now_ns - bfqd->last_dispatch)>>10,
@@ -3945,7 +3954,7 @@ static void bfq_update_peak_rate(struct bfq_data *bfqd, struct request *rq)
 	/* Update sampling information */
 	bfqd->peak_rate_samples++;
 
-	if ((bfqd->rq_in_driver > 0 ||
+	if ((bfqd->tot_rq_in_driver > 0 ||
 		now_ns - bfqd->last_completion < BFQ_MIN_TT)
 	    && !BFQ_RQ_SEEKY(bfqd, bfqd->last_position, rq))
 		bfqd->sequential_samples++;
@@ -4229,7 +4238,7 @@ static bool idling_needed_for_service_guarantees(struct bfq_data *bfqd,
 	asymmetric_scenario = (bfqq->wr_coeff > 1 &&
 		(bfqd->wr_busy_queues <
 		 tot_busy_queues ||
-		 bfqd->rq_in_driver >=
+		 bfqd->tot_rq_in_driver >=
 		 bfqq->dispatched + 4)) ||
 		bfq_asymmetric_scenario(bfqd, bfqq) ||
 		tot_busy_queues == 1;
@@ -5062,6 +5071,7 @@ bfq_choose_bfqq_for_injection(struct bfq_data *bfqd)
 {
 	struct bfq_queue *bfqq, *in_serv_bfqq = bfqd->in_service_queue;
 	unsigned int limit = in_serv_bfqq->inject_limit;
+	int i;
 	/*
 	 * If
 	 * - bfqq is not weight-raised and therefore does not carry
@@ -5093,7 +5103,7 @@ bfq_choose_bfqq_for_injection(struct bfq_data *bfqd)
 		)
 		limit = 1;
 
-	if (bfqd->rq_in_driver >= limit)
+	if (bfqd->tot_rq_in_driver >= limit)
 		goto no_queue;
 
 	/*
@@ -5108,12 +5118,13 @@ bfq_choose_bfqq_for_injection(struct bfq_data *bfqd)
 	 *   (and re-added only if it gets new requests, but then it
 	 *   is assigned again enough budget for its new backlog).
 	 */
-	list_for_each_entry(bfqq, &bfqd->active_list, bfqq_list)
-		if (!RB_EMPTY_ROOT(&bfqq->sort_list) &&
-		    (in_serv_always_inject || bfqq->wr_coeff > 1) &&
-		    bfq_serv_to_charge(bfqq->next_rq, bfqq) <=
-		    bfq_bfqq_budget_left(bfqq)) {
-			bfq_log_bfqq(bfqd, bfqq, "found this queue");
+	for (i = 0; i < BFQ_NUM_ACTUATORS; i++) {
+		list_for_each_entry(bfqq, &bfqd->active_list[i], bfqq_list)
+			if (!RB_EMPTY_ROOT(&bfqq->sort_list) &&
+				(in_serv_always_inject || bfqq->wr_coeff > 1) &&
+				bfq_serv_to_charge(bfqq->next_rq, bfqq) <=
+				bfq_bfqq_budget_left(bfqq)) {
+				bfq_log_bfqq(bfqd, bfqq, "found this queue");
 
 			/*
 			 * Allow for only one large in-flight request
@@ -5142,21 +5153,56 @@ bfq_choose_bfqq_for_injection(struct bfq_data *bfqd)
 			bfq_log_bfqq(bfqd, bfqq,
 				     "rq_sect %u in_driver %d limit %u",
 				     blk_rq_sectors(bfqq->next_rq),
-				     bfqd->rq_in_driver, limit);
+				     bfqd->tot_rq_in_driver, limit);
 
-			if (bfqd->rq_in_driver < limit) {
+			if (bfqd->tot_rq_in_driver < limit) {
 				bfq_log_bfqq(bfqd, bfqq,
 					     "returned this queue, rqs_inj set");
 				bfqd->rqs_injected = true;
 				return bfqq;
 			}
 		}
+	}
 
 no_queue:
 	bfq_log(bfqd, "no queue found: in_driver %d limit %u",
-		bfqd->rq_in_driver, limit);
+		bfqd->tot_rq_in_driver, limit);
+		return NULL;
+}
+
+struct bfq_queue *bfq_find_bfqq_for_actuator(struct bfq_data *bfqd, int idx)
+{
+	struct bfq_queue *bfqq = NULL;
+
+	if (bfqd->in_service_queue && bfqd->in_service_queue->actuator_idx == idx)
+		return bfqd->in_service_queue;
+
+	list_for_each_entry(bfqq, &bfqd->active_list[idx], bfqq_list) {
+		if (!RB_EMPTY_ROOT(&bfqq->sort_list) &&
+			bfq_serv_to_charge(bfqq->next_rq, bfqq) <=
+				bfq_bfqq_budget_left(bfqq)) {
+			return bfqq;
+		}
+	}
+
 	return NULL;
 }
+
+struct bfq_queue *bfq_find_bfqq_to_balance_actuators(struct bfq_data *bfqd)
+{
+	int i;
+
+	for (i = 0 ; i < BFQ_NUM_ACTUATORS; i++)
+		if (bfqd->rq_in_driver[i] < bfqd->min_load_threshold) {
+			struct bfq_queue *inject_bfqq =
+				bfq_find_bfqq_for_actuator(bfqd, i);
+			if (inject_bfqq)
+				return inject_bfqq;
+		}
+
+	return NULL;
+}
+
 
 /*
  * Select a queue for service.  If we have a current queue in service,
@@ -5164,7 +5210,7 @@ no_queue:
  */
 static struct bfq_queue *bfq_select_queue(struct bfq_data *bfqd)
 {
-	struct bfq_queue *bfqq;
+	struct bfq_queue *bfqq, *inject_bfqq;
 	struct request *next_rq;
 	enum bfqq_expiration reason = BFQQE_BUDGET_TIMEOUT;
 
@@ -5186,6 +5232,10 @@ static struct bfq_queue *bfq_select_queue(struct bfq_data *bfqd)
 		goto expire;
 
 check_queue:
+	inject_bfqq = bfq_find_bfqq_to_balance_actuators(bfqd);
+	if (inject_bfqq && inject_bfqq != bfqq)
+		return inject_bfqq;
+
 	/*
 	 * This loop is rarely executed more than once. Even when it
 	 * happens, it is much more convenient to re-execute this loop
@@ -5648,11 +5698,11 @@ static struct request *__bfq_dispatch_request(struct blk_mq_hw_ctx *hctx)
 
 		/*
 		 * We exploit the bfq_finish_requeue_request hook to
-		 * decrement rq_in_driver, but
+		 * decrement tot_rq_in_driver, but
 		 * bfq_finish_requeue_request will not be invoked on
 		 * this request. So, to avoid unbalance, just start
-		 * this request, without incrementing rq_in_driver. As
-		 * a negative consequence, rq_in_driver is deceptively
+		 * this request, without incrementing tot_rq_in_driver. As
+		 * a negative consequence, tot_rq_in_driver is deceptively
 		 * lower than it should be while this request is in
 		 * service. This may cause bfq_schedule_dispatch to be
 		 * invoked uselessly.
@@ -5661,7 +5711,7 @@ static struct request *__bfq_dispatch_request(struct blk_mq_hw_ctx *hctx)
 		 * bfq_finish_requeue_request hook, if defined, is
 		 * probably invoked also on this request. So, by
 		 * exploiting this hook, we could 1) increment
-		 * rq_in_driver here, and 2) decrement it in
+		 * tot_rq_in_driver here, and 2) decrement it in
 		 * bfq_finish_requeue_request. Such a solution would
 		 * let the value of the counter be always accurate,
 		 * but it would entail using an extra interface
@@ -5689,7 +5739,7 @@ static struct request *__bfq_dispatch_request(struct blk_mq_hw_ctx *hctx)
 	 * Of course, serving one request at a time may cause loss of
 	 * throughput.
 	 */
-	if (bfqd->strict_guarantees && bfqd->rq_in_driver > 0)
+	if (bfqd->strict_guarantees && bfqd->tot_rq_in_driver > 0)
 		goto exit;
 
 	bfqq = bfq_select_queue(bfqd);
@@ -5708,23 +5758,24 @@ static struct request *__bfq_dispatch_request(struct blk_mq_hw_ctx *hctx)
 
 	if (rq) {
 inc_in_driver_start_rq:
-		bfqd->rq_in_driver++;
+		bfqd->rq_in_driver[bfqq->actuator_idx]++;
+		bfqd->tot_rq_in_driver++;
 start_rq:
 		rq->rq_flags |= RQF_STARTED;
 		if (bfqq)
 			bfq_log_bfqq(bfqd, bfqq,
-				"%s request %p (%u), rq_in_driver %d",
+				"%s request %p (%u), tot_rq_in_driver %d",
 				     bfq_bfqq_sync(bfqq) ? "sync" : "async",
 				     rq, blk_rq_sectors(rq),
-				     bfqd->rq_in_driver);
+				     bfqd->tot_rq_in_driver);
 		else
 			bfq_log(bfqd,
-		"request %p from dispatch list, rq_in_driver %d",
-				rq, bfqd->rq_in_driver);
+		"request %p from dispatch list, tot_rq_in_driver %d",
+				rq, bfqd->tot_rq_in_driver);
 	} else
 		bfq_log(bfqd,
-		"returned NULL request, rq_in_driver %d",
-			bfqd->rq_in_driver);
+		"returned NULL request, tot_rq_in_driver %d",
+			bfqd->tot_rq_in_driver);
 
 exit:
 	return rq;
@@ -6969,7 +7020,7 @@ static void bfq_update_hw_tag(struct bfq_data *bfqd)
 	struct bfq_queue *bfqq = bfqd->in_service_queue;
 
 	bfqd->max_rq_in_driver = max_t(int, bfqd->max_rq_in_driver,
-				       bfqd->rq_in_driver);
+				       bfqd->tot_rq_in_driver);
 
 	if (bfqd->hw_tag == 1)
 		return;
@@ -6980,7 +7031,7 @@ static void bfq_update_hw_tag(struct bfq_data *bfqd)
 	 * sum is not exact, as it's not taking into account deactivated
 	 * requests.
 	 */
-	if (bfqd->rq_in_driver + bfqd->queued <= BFQ_HW_QUEUE_THRESHOLD)
+	if (bfqd->tot_rq_in_driver + bfqd->queued <= BFQ_HW_QUEUE_THRESHOLD)
 		return;
 
 	/*
@@ -6991,7 +7042,7 @@ static void bfq_update_hw_tag(struct bfq_data *bfqd)
 	if (bfqq && bfq_bfqq_has_short_ttime(bfqq) &&
 	    bfqq->dispatched + bfqq->queued[0] + bfqq->queued[1] <
 	    BFQ_HW_QUEUE_THRESHOLD &&
-	    bfqd->rq_in_driver < BFQ_HW_QUEUE_THRESHOLD)
+	    bfqd->tot_rq_in_driver < BFQ_HW_QUEUE_THRESHOLD)
 		return;
 
 	if (bfqd->hw_tag_samples++ < BFQ_HW_QUEUE_SAMPLES)
@@ -7012,16 +7063,17 @@ static void bfq_completed_request(struct bfq_queue *bfqq, struct bfq_data *bfqd)
 
 	bfq_update_hw_tag(bfqd);
 
-	BFQ_BUG_ON(!bfqd->rq_in_driver);
+	BFQ_BUG_ON(!bfqd->tot_rq_in_driver);
 	BFQ_BUG_ON(!bfqq->dispatched);
-	bfqd->rq_in_driver--;
+	bfqd->rq_in_driver[bfqq->actuator_idx]--;
+	bfqd->tot_rq_in_driver--;
 
 	bfqq->dispatched--;
 
 	bfq_log_bfqq(bfqd, bfqq,
-		     "in_serv %d, new disp %d, new rq_in_driver %d",
+		     "in_serv %d, new disp %d, new tot_rq_in_driver %d",
 		     bfqq == bfqd->in_service_queue,
-		     bfqq->dispatched, bfqd->rq_in_driver);
+		     bfqq->dispatched, bfqd->tot_rq_in_driver);
 
 	if (!bfqq->dispatched && !bfq_bfqq_busy(bfqq)) {
 		BFQ_BUG_ON(!RB_EMPTY_ROOT(&bfqq->sort_list));
@@ -7154,7 +7206,7 @@ static void bfq_completed_request(struct bfq_queue *bfqq, struct bfq_data *bfqd)
 					BFQQE_NO_MORE_REQUESTS);
 	}
 
-	if (!bfqd->rq_in_driver)
+	if (!bfqd->tot_rq_in_driver)
 		bfq_schedule_dispatch(bfqd);
 }
 
@@ -7282,7 +7334,7 @@ static void bfq_update_inject_limit(struct bfq_data *bfqd,
 		     "tot_time_ns %llu last_serv_time_ns %llu old limit %u",
 		     tot_time_ns, bfqq->last_serv_time_ns, old_limit);
 
-	bfq_log_bfqq(bfqd, bfqq, "rq_in_driver %d", bfqd->rq_in_driver);
+	bfq_log_bfqq(bfqd, bfqq, "tot_rq_in_driver %d", bfqd->tot_rq_in_driver);
 
 	if (bfqq->last_serv_time_ns > 0 && bfqd->rqs_injected) {
 		u64 threshold = (bfqq->last_serv_time_ns * 3)>>1;
@@ -7301,7 +7353,7 @@ static void bfq_update_inject_limit(struct bfq_data *bfqd,
 	}
 	BUG_ON(bfqq->last_serv_time_ns == 0 && old_limit > 1);
 
-	BUG_ON(bfqd->rq_in_driver < 1);
+	BFQ_BUG_ON(bfqd->tot_rq_in_driver < 1);
 
 	/*
 	 * Either we still have to compute the base value for the
@@ -7309,13 +7361,13 @@ static void bfq_update_inject_limit(struct bfq_data *bfqd,
 	 * conditions to do it, or we can lower the last base value
 	 * computed.
 	 *
-	 * NOTE: (bfqd->rq_in_driver == 1) means that there is no I/O
+	 * NOTE: (bfqd->tot_rq_in_driver == 1) means that there is no I/O
 	 * request in flight, because this function is in the code
 	 * path that handles the completion of a request of bfqq, and,
 	 * in particular, this function is executed before
-	 * bfqd->rq_in_driver is decremented in such a code path.
+	 * bfqd->tot_rq_in_driver is decremented in such a code path.
 	 */
-	if ((bfqq->last_serv_time_ns == 0 && bfqd->rq_in_driver == 1) ||
+	if ((bfqq->last_serv_time_ns == 0 && bfqd->tot_rq_in_driver == 1) ||
 	    tot_time_ns < bfqq->last_serv_time_ns) {
 		if (bfqq->last_serv_time_ns == 0) {
 			/*
@@ -7325,7 +7377,7 @@ static void bfq_update_inject_limit(struct bfq_data *bfqd,
 			bfqq->inject_limit = max_t(unsigned int, 1, old_limit);
 		}
 		bfqq->last_serv_time_ns = tot_time_ns;
-	} else if (!bfqd->rqs_injected && bfqd->rq_in_driver == 1)
+	} else if (!bfqd->rqs_injected && bfqd->tot_rq_in_driver == 1)
 		/*
 		 * No I/O injected and no request still in service in
 		 * the drive: these are the exact conditions for
@@ -7940,7 +7992,8 @@ static void bfq_exit_queue(struct elevator_queue *e)
 	hrtimer_cancel(&bfqd->idle_slice_timer);
 
 	BFQ_BUG_ON(bfqd->in_service_queue);
-	BFQ_BUG_ON(!list_empty(&bfqd->active_list));
+	BFQ_BUG_ON(!list_empty(&bfqd->active_list[0]));
+	BFQ_BUG_ON(!list_empty(&bfqd->active_list[1]));
 
 	spin_lock_irq(&bfqd->lock);
 	list_for_each_entry_safe(bfqq, n, &bfqd->idle_list, bfqq_list)
@@ -8037,7 +8090,8 @@ static int bfq_init_queue(struct request_queue *q, struct elevator_type *e)
 	bfqd->queue_weights_tree = RB_ROOT_CACHED;
 	bfqd->num_groups_with_pending_reqs = 0;
 
-	INIT_LIST_HEAD(&bfqd->active_list);
+	INIT_LIST_HEAD(&bfqd->active_list[0]);
+	INIT_LIST_HEAD(&bfqd->active_list[1]);
 	INIT_LIST_HEAD(&bfqd->idle_list);
 	INIT_HLIST_HEAD(&bfqd->burst_list);
 
@@ -8081,6 +8135,7 @@ static int bfq_init_queue(struct request_queue *q, struct elevator_type *e)
 	bfqd->rate_dur_prod = ref_rate[blk_queue_nonrot(bfqd->queue)] *
 		ref_wr_duration[blk_queue_nonrot(bfqd->queue)];
 	bfqd->peak_rate = ref_rate[blk_queue_nonrot(bfqd->queue)] * 2 / 3;
+	bfqd->min_load_threshold = 4;
 
 	spin_lock_init(&bfqd->lock);
 
@@ -8157,6 +8212,7 @@ static ssize_t bfq_weights_show(struct elevator_queue *e, char *page)
 	struct bfq_queue *bfqq;
 	struct bfq_data *bfqd = e->elevator_data;
 	ssize_t num_char = 0;
+	int i;
 
 	num_char += sprintf(page + num_char, "Tot reqs queued %d\n\n",
 			    bfqd->queued);
@@ -8164,19 +8220,21 @@ static ssize_t bfq_weights_show(struct elevator_queue *e, char *page)
 	spin_lock_irq(&bfqd->lock);
 
 	num_char += sprintf(page + num_char, "Active:\n");
-	list_for_each_entry(bfqq, &bfqd->active_list, bfqq_list) {
-		num_char += sprintf(page + num_char,
-				    "pid%d: weight %hu, nr_queued %d %d, ",
-				    bfq_get_first_task_pid(bfqq),
-				    bfqq->entity.weight,
-				    bfqq->queued[0],
-				    bfqq->queued[1]);
-		num_char += sprintf(page + num_char,
-				    "dur %d/%u\n",
-				    jiffies_to_msecs(
-					    jiffies -
-					    bfqq->last_wr_start_finish),
-				    jiffies_to_msecs(bfqq->wr_cur_max_time));
+	for (i = 0; i < BFQ_NUM_ACTUATORS; i++) {
+		list_for_each_entry(bfqq, &bfqd->active_list[i], bfqq_list) {
+			num_char += sprintf(page + num_char,
+						"pid%d: weight %hu, nr_queued %d %d, ",
+						bfq_get_first_task_pid(bfqq),
+						bfqq->entity.weight,
+						bfqq->queued[0],
+						bfqq->queued[1]);
+			num_char += sprintf(page + num_char,
+						"dur %d/%u\n",
+						jiffies_to_msecs(
+							jiffies -
+							bfqq->last_wr_start_finish),
+						jiffies_to_msecs(bfqq->wr_cur_max_time));
+		}
 	}
 
 	num_char += sprintf(page + num_char, "Idle:\n");

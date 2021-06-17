@@ -576,7 +576,7 @@ static void bfq_active_insert(struct bfq_service_tree *st,
 	bfqd = (struct bfq_data *)bfqg->bfqd;
 #endif
 	if (bfqq)
-		list_add(&bfqq->bfqq_list, &bfqq->bfqd->active_list);
+		list_add(&bfqq->bfqq_list, &bfqq->bfqd->active_list[bfqq->actuator_idx]);
 #ifdef CONFIG_BFQ_GROUP_IOSCHED
 	if (bfqg != bfqd->root_group) {
 		BFQ_BUG_ON(!bfqg);
