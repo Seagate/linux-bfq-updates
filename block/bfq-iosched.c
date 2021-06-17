@@ -8457,6 +8457,8 @@ SHOW_FUNCTION(bfq_wr_min_idle_time_show, bfqd->bfq_wr_min_idle_time, 1);
 SHOW_FUNCTION(bfq_wr_min_inter_arr_async_show, bfqd->bfq_wr_min_inter_arr_async,
 	1);
 SHOW_FUNCTION(bfq_wr_max_softrt_rate_show, bfqd->bfq_wr_max_softrt_rate, 0);
+SHOW_FUNCTION(bfq_actuator_load_threshold_show, bfqd->actuator_load_threshold,
+	      4);
 #undef SHOW_FUNCTION
 
 #define USEC_SHOW_FUNCTION(__FUNC, __VAR)				\
@@ -8511,6 +8513,8 @@ STORE_FUNCTION(bfq_wr_min_inter_arr_async_store,
 		&bfqd->bfq_wr_min_inter_arr_async, 0, INT_MAX, 1);
 STORE_FUNCTION(bfq_wr_max_softrt_rate_store, &bfqd->bfq_wr_max_softrt_rate, 0,
 		INT_MAX, 0);
+STORE_FUNCTION(bfq_actuator_load_threshold_store,
+	       &bfqd->actuator_load_threshold, 0, INT_MAX, 0);
 #undef STORE_FUNCTION
 
 #define USEC_STORE_FUNCTION(__FUNC, __PTR, MIN, MAX)			\
@@ -8655,6 +8659,7 @@ static struct elv_fs_entry bfq_attrs[] = {
 	BFQ_ATTR(wr_min_inter_arr_async),
 	BFQ_ATTR(wr_max_softrt_rate),
 	BFQ_ATTR(weights),
+	BFQ_ATTR(actuator_load_threshold),
 	__ATTR_NULL
 };
 
