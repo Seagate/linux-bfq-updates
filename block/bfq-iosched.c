@@ -5206,7 +5206,9 @@ struct bfq_queue *bfq_find_bfqq_to_balance_actuators(struct bfq_data *bfqd)
 	int i;
 
 	for (i = 0 ; i < BFQ_NUM_ACTUATORS; i++)
-		if (bfqd->rq_in_driver[i] < bfqd->min_load_threshold) {
+		if (bfqd->rq_in_driver[i] < bfqd->min_load_threshold &&
+			(i == BFQ_NUM_ACTUATORS - 1 ||
+				bfqd->rq_in_driver[i] < bfqd->rq_in_driver[i+1])) {
 			struct bfq_queue *inject_bfqq =
 				bfq_find_bfqq_for_actuator(bfqd, i);
 			if (inject_bfqq)
