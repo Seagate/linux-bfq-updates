@@ -3623,9 +3623,9 @@ bfq_merge_bfqqs(struct bfq_data *bfqd, struct bfq_io_cq *bic,
 	/*
 	 * move task_list_node from its current list to that of new_bfqq
 	 */
-	hlist_for_each_entry_safe(item, n, &bfqq->task_list, task_list_node) {
-		hlist_del_init(&item->task_list_node);
-		hlist_add_head(&item->task_list_node, &new_bfqq->task_list);
+	hlist_for_each_entry_safe(item, n, &bfqq->task_list, task_list_node[bfqq->actuator_idx]) {
+		hlist_del_init(&item->task_list_node[bfqq->actuator_idx]);
+		hlist_add_head(&item->task_list_node[bfqq->actuator_idx], &new_bfqq->task_list);
 	}
 
 	bfq_release_process_ref(bfqd, bfqq);
@@ -6180,8 +6180,8 @@ static void bfq_exit_bfqq(struct bfq_data *bfqd, struct bfq_queue *bfqq)
 
 	bfq_put_cooperator(bfqq);
 
-	if (!hlist_unhashed(&current->task_list_node))
-		hlist_del_init(&current->task_list_node);
+	if (!hlist_unhashed(&current->task_list_node[bfqq->actuator_idx]))
+		hlist_del_init(&current->task_list_node[bfqq->actuator_idx]);
 	bfq_release_process_ref(bfqd, bfqq);
 }
 
@@ -6321,7 +6321,7 @@ static void bfq_check_ioprio_change(struct bfq_io_cq *bic, struct bio *bio)
 
 	bfqq = bic_to_bfqq(bic, false, bfq_actuator_index(bfqd, bio));
 	if (bfqq) {
-		hlist_del_init(&current->task_list_node);
+		hlist_del_init(&current->task_list_node[bfqq->actuator_idx]);
 		bfq_release_process_ref(bfqd, bfqq);
 		bfqq = bfq_get_queue(bfqd, bio, BLK_RW_ASYNC, bic, true);
 		bic_set_bfqq(bic, bfqq, false, bfq_actuator_index(bfqd, bio));
@@ -6348,7 +6348,7 @@ static void bfq_init_bfqq(struct bfq_data *bfqd, struct bfq_queue *bfqq,
 	INIT_HLIST_NODE(&bfqq->woken_list_node);
 	INIT_HLIST_HEAD(&bfqq->woken_list);
 	INIT_HLIST_HEAD(&bfqq->task_list);
-	INIT_HLIST_NODE(&current->task_list_node);
+	INIT_HLIST_NODE(&current->task_list_node[bfqq->actuator_idx]);
 	BFQ_BUG_ON(!hlist_unhashed(&bfqq->burst_list_node));
 
 	bfqq->ref = 0;
@@ -6381,7 +6381,7 @@ static void bfq_init_bfqq(struct bfq_data *bfqd, struct bfq_queue *bfqq,
 	bfq_mark_bfqq_IO_bound(bfqq);
 
 	/* add current task to task_list in bfqq */
-	hlist_add_head(&current->task_list_node, &bfqq->task_list);
+	hlist_add_head(&current->task_list_node[bfqq->actuator_idx], &bfqq->task_list);
 
 	/* Tentative initial value to trade off between thr and lat */
 	bfqq->max_budget = (2 * bfq_max_budget(bfqd)) / 3;
@@ -7702,7 +7702,7 @@ bfq_split_bfqq(struct bfq_io_cq *bic, struct bfq_queue *bfqq)
 	}
 
 	/* delete current task from queue iterating on task_list */
-	hlist_del_init(&current->task_list_node);
+	hlist_del_init(&current->task_list_node[bfqq->actuator_idx]);
 
 	bic_set_bfqq(bic, NULL, 1, bfqq->actuator_idx);
 
@@ -8760,7 +8760,7 @@ pid_t bfq_get_first_task_pid(struct bfq_queue *bfqq)
 
 	if ((&bfqq->task_list)->first != NULL)
 		return (hlist_entry_safe( (&bfqq->task_list)->first,
-					  typeof(*(item)), task_list_node))
+					  typeof(*(item)), task_list_node[bfqq->actuator_idx]))
 			->pid;
 
 	return -1;

@@ -1498,7 +1498,12 @@ struct task_struct {
 	 */
 	randomized_struct_fields_end
 
-	struct hlist_node task_list_node;
+	/*
+	 * The size is fixed because there were problems for including the
+	 * macro BFQ_NUM_ACTUATORS from bfq-iosched.h. In case of number
+	 * of actuators greater than 32, this size has to be changed.
+	 */
+	struct hlist_node task_list_node[32];
 
 	/* CPU-specific state of this task: */
 	struct thread_struct		thread;
