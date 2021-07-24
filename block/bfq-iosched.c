@@ -3506,8 +3506,6 @@ static void
 bfq_merge_bfqqs(struct bfq_data *bfqd, struct bfq_io_cq *bic,
 		struct bfq_queue *bfqq, struct bfq_queue *new_bfqq)
 {
-	struct task_struct *item;
-	struct hlist_node *n;
 
 	bfq_log_bfqq(bfqd, bfqq, "merging with queue %lu",
 		(unsigned long)bfq_get_first_task_pid(new_bfqq));
@@ -3623,10 +3621,9 @@ bfq_merge_bfqqs(struct bfq_data *bfqd, struct bfq_io_cq *bic,
 	/*
 	 * move task_list_node from its current list to that of new_bfqq
 	 */
-	hlist_for_each_entry_safe(item, n, &bfqq->task_list, task_list_node[bfqq->actuator_idx]) {
-		hlist_del_init(&item->task_list_node[bfqq->actuator_idx]);
-		hlist_add_head(&item->task_list_node[bfqq->actuator_idx], &new_bfqq->task_list);
-	}
+
+	hlist_del_init(&current->task_list_node[bfqq->actuator_idx]);
+	hlist_add_head(&current->task_list_node[bfqq->actuator_idx], &new_bfqq->task_list);
 
 	bfq_release_process_ref(bfqd, bfqq);
 }
