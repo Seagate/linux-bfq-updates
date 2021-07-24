@@ -6651,6 +6651,7 @@ static struct bfq_queue *bfq_get_queue(struct bfq_data *bfqd,
 	}
 
 	act_idx = bfq_actuator_index(bfqd, bio);
+	BFQ_BUG_ON(act_idx > 31);
 	if (!is_sync) {
 		async_bfqq = bfq_async_queue_prio(bfqd, bfqg, ioprio_class,
 						  ioprio, act_idx);
