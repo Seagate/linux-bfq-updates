@@ -3621,7 +3621,7 @@ bfq_merge_bfqqs(struct bfq_data *bfqd, struct bfq_io_cq *bic,
 	/*
 	 * move task_list_node from its current list to that of new_bfqq
 	 */
-
+	BFQ_BUG_ON(hlist_unhashed(&current->task_list_node[bfqq->actuator_idx]));
 	hlist_del_init(&current->task_list_node[bfqq->actuator_idx]);
 	hlist_add_head(&current->task_list_node[bfqq->actuator_idx], &new_bfqq->task_list);
 
