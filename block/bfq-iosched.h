@@ -437,30 +437,37 @@ struct bfq_io_cq {
 	uint64_t blkcg_serial_nr; /* the current blkcg serial */
 #endif
 	/*
-	 * Snapshot of the has_short_time flag before merging; taken
-	 * to remember its value while the queue is merged, so as to
-	 * be able to restore it in case of split.
+	 * Several fields follow, which are used to support
+	 * queue-merging operations. Each field is an array, because a
+	 * process may be associated with multiple bfq_queues (see the
+	 * field bfqq above). And each of these queues may undergo a
+	 * merge.
 	 */
-	bool saved_has_short_ttime;
+	/*
+	 * Snapshot of the has_short_time flags before merging; taken
+	 * to remember their values while a queue is merged, so as to
+	 * be able to restore them in case of split.
+	 */
+	bool saved_has_short_ttime[BFQ_NUM_ACTUATORS];
 	/*
 	 * Same purpose as the previous two fields for the I/O bound
 	 * classification of a queue.
 	 */
-	bool saved_IO_bound;
+	bool saved_IO_bound[BFQ_NUM_ACTUATORS];
 
-	u64 saved_io_start_time;
-	u64 saved_tot_idle_time;
+	u64 saved_io_start_time[BFQ_NUM_ACTUATORS];
+	u64 saved_tot_idle_time[BFQ_NUM_ACTUATORS];
 
 	/*
-	 * Same purpose as the previous fields for the value of the
+	 * Same purpose as the previous fields for the values of the
 	 * field keeping the queue's belonging to a large burst
 	 */
-	bool saved_in_large_burst;
+	bool saved_in_large_burst[BFQ_NUM_ACTUATORS];
 	/*
 	 * True if the queue belonged to a burst list before its merge
 	 * with another cooperating queue.
 	 */
-	bool was_in_burst_list;
+	bool was_in_burst_list[BFQ_NUM_ACTUATORS];
 
 	/*
 	 * Save the weight when a merge occurs, to be able
@@ -469,27 +476,27 @@ struct bfq_io_cq {
 	 * then the weight of the recycled queue could differ
 	 * from the weight of the original queue.
 	 */
-	unsigned int saved_weight;
+	unsigned int saved_weight[BFQ_NUM_ACTUATORS];
 
 	/*
 	 * Similar to previous fields: save wr information.
 	 */
-	unsigned long saved_wr_coeff;
-	unsigned long saved_last_wr_start_finish;
-	unsigned long saved_service_from_wr;
-	unsigned long saved_wr_start_at_switch_to_srt;
-	unsigned int saved_wr_cur_max_time;
-	struct bfq_ttime saved_ttime;
+	unsigned long saved_wr_coeff[BFQ_NUM_ACTUATORS];
+	unsigned long saved_last_wr_start_finish[BFQ_NUM_ACTUATORS];
+	unsigned long saved_service_from_wr[BFQ_NUM_ACTUATORS];
+	unsigned long saved_wr_start_at_switch_to_srt[BFQ_NUM_ACTUATORS];
+	unsigned int saved_wr_cur_max_time[BFQ_NUM_ACTUATORS];
+	struct bfq_ttime saved_ttime[BFQ_NUM_ACTUATORS];
 
 	/* Save also injection state */
-	u64 saved_last_serv_time_ns;
-	unsigned int saved_inject_limit;
-	unsigned long saved_decrease_time_jif;
+	u64 saved_last_serv_time_ns[BFQ_NUM_ACTUATORS];
+	unsigned int saved_inject_limit[BFQ_NUM_ACTUATORS];
+	unsigned long saved_decrease_time_jif[BFQ_NUM_ACTUATORS];
 
 	/* candidate queue for a stable merge (due to close creation time) */
-	struct bfq_queue *stable_merge_bfqq;
+	struct bfq_queue *stable_merge_bfqq[BFQ_NUM_ACTUATORS];
 
-	bool stably_merged;	/* non splittable if true */
+	bool stably_merged[BFQ_NUM_ACTUATORS];	/* non splittable if true */
 };
 
 /**

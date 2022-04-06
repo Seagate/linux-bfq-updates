@@ -417,7 +417,7 @@ void bic_set_bfqq(struct bfq_io_cq *bic,
 	 */
 	bic->bfqq[is_sync][actuator_idx] = bfqq;
 
-	if (bfqq && bic->stable_merge_bfqq == bfqq) {
+	if (bfqq && bic->stable_merge_bfqq[actuator_idx] == bfqq) {
 		/*
 		 * Actually, these same instructions are executed also
 		 * in bfq_setup_cooperator, in case of abort or actual
@@ -426,9 +426,9 @@ void bic_set_bfqq(struct bfq_io_cq *bic,
 		 * did so, we would nest even more complexity in this
 		 * function.
 		 */
-		bfq_put_stable_ref(bic->stable_merge_bfqq);
+		bfq_put_stable_ref(bic->stable_merge_bfqq[actuator_idx]);
 
-		bic->stable_merge_bfqq = NULL;
+		bic->stable_merge_bfqq[actuator_idx] = NULL;
 	}
 }
 
@@ -1238,39 +1238,41 @@ bfq_bfqq_resume_state(struct bfq_queue *bfqq, struct bfq_data *bfqd,
 {
 	unsigned int old_wr_coeff = 1;
 	bool busy = bfq_already_existing && bfq_bfqq_busy(bfqq);
+	unsigned int a_idx = bfqq->actuator_idx;
 
-	if (bic->saved_has_short_ttime)
+	if (bic->saved_has_short_ttime[a_idx])
 		bfq_mark_bfqq_has_short_ttime(bfqq);
 	else
 		bfq_clear_bfqq_has_short_ttime(bfqq);
 
-	if (bic->saved_IO_bound)
+	if (bic->saved_IO_bound[a_idx])
 		bfq_mark_bfqq_IO_bound(bfqq);
 	else
 		bfq_clear_bfqq_IO_bound(bfqq);
 
-	bfqq->last_serv_time_ns = bic->saved_last_serv_time_ns;
-	bfqq->inject_limit = bic->saved_inject_limit;
-	bfqq->decrease_time_jif = bic->saved_decrease_time_jif;
+	bfqq->last_serv_time_ns = bic->saved_last_serv_time_ns[a_idx];
+	bfqq->inject_limit = bic->saved_inject_limit[a_idx];
+	bfqq->decrease_time_jif = bic->saved_decrease_time_jif[a_idx];
 
-	BFQ_BUG_ON(bic->saved_weight == 0);
+	BFQ_BUG_ON(bic->saved_weight[a_idx] == 0);
 
-	bfqq->entity.new_weight = bic->saved_weight;
-	bfqq->ttime = bic->saved_ttime;
-	bfqq->io_start_time = bic->saved_io_start_time;
-	bfqq->tot_idle_time = bic->saved_tot_idle_time;
+	bfqq->entity.new_weight = bic->saved_weight[a_idx];
+	bfqq->ttime = bic->saved_ttime[a_idx];
+	bfqq->io_start_time = bic->saved_io_start_time[a_idx];
+	bfqq->tot_idle_time = bic->saved_tot_idle_time[a_idx];
 	/*
 	 * Restore weight coefficient only if low_latency is on
 	 */
 	if (bfqd->low_latency) {
 		old_wr_coeff = bfqq->wr_coeff;
-		bfqq->wr_coeff = bic->saved_wr_coeff;
+		bfqq->wr_coeff = bic->saved_wr_coeff[a_idx];
 	}
-	bfqq->service_from_wr = bic->saved_service_from_wr;
-	bfqq->wr_start_at_switch_to_srt = bic->saved_wr_start_at_switch_to_srt;
+	bfqq->service_from_wr = bic->saved_service_from_wr[a_idx];
+	bfqq->wr_start_at_switch_to_srt =
+				bic->saved_wr_start_at_switch_to_srt[a_idx];
 	BFQ_BUG_ON(time_is_after_jiffies(bfqq->wr_start_at_switch_to_srt));
-	bfqq->last_wr_start_finish = bic->saved_last_wr_start_finish;
-	bfqq->wr_cur_max_time = bic->saved_wr_cur_max_time;
+	bfqq->last_wr_start_finish = bic->saved_last_wr_start_finish[a_idx];
+	bfqq->wr_cur_max_time = bic->saved_wr_cur_max_time[a_idx];
 	BFQ_BUG_ON(time_is_after_jiffies(bfqq->last_wr_start_finish));
 
 	bfq_log_bfqq(bfqq->bfqd, bfqq,
@@ -3194,6 +3196,7 @@ bfq_setup_cooperator(struct bfq_data *bfqd, struct bfq_queue *bfqq,
 		     void *io_struct, bool request, struct bfq_io_cq *bic)
 {
 	struct bfq_queue *in_service_bfqq, *new_bfqq;
+	unsigned int a_idx = bfqq->actuator_idx;
 
 	BFQ_BUG_ON(!bic);
 
@@ -3217,14 +3220,14 @@ bfq_setup_cooperator(struct bfq_data *bfqd, struct bfq_queue *bfqq,
 		 * stable merging) also if bic is associated with a
 		 * sync queue, but this bfqq is async
 		 */
-		if (bfq_bfqq_sync(bfqq) && bic->stable_merge_bfqq &&
+		if (bfq_bfqq_sync(bfqq) && bic->stable_merge_bfqq[a_idx] &&
 		    !bfq_bfqq_just_created(bfqq) &&
 		    time_is_before_jiffies(bfqq->split_time +
 					  msecs_to_jiffies(bfq_late_stable_merging)) &&
 		    time_is_before_jiffies(bfqq->creation_time +
 					   msecs_to_jiffies(bfq_late_stable_merging))) {
 			struct bfq_queue *stable_merge_bfqq =
-				bic->stable_merge_bfqq;
+				bic->stable_merge_bfqq[a_idx];
 			int proc_ref = min(bfqq_process_refs(bfqq),
 					   bfqq_process_refs(stable_merge_bfqq));
 
@@ -3238,7 +3241,7 @@ bfq_setup_cooperator(struct bfq_data *bfqd, struct bfq_queue *bfqq,
 			BFQ_BUG_ON(proc_ref > 0 &&
 				   bfqq_process_refs(stable_merge_bfqq) < proc_ref);
 
-			bic->stable_merge_bfqq = NULL;
+			bic->stable_merge_bfqq[a_idx] = NULL;
 
 			if (!idling_boosts_thr_without_issues(bfqd, bfqq) &&
 			    proc_ref > 0) {
@@ -3258,9 +3261,9 @@ bfq_setup_cooperator(struct bfq_data *bfqd, struct bfq_queue *bfqq,
 						     new_bfqq);
 				}
 
-				bic->stably_merged = true;
+				bic->stably_merged[a_idx] = true;
 				if (new_bfqq && new_bfqq->bic)
-					new_bfqq->bic->stably_merged = true;
+					new_bfqq->bic->stably_merged[new_bfqq->actuator_idx] = true;
 				return new_bfqq;
 			} else {
 				bfq_log_bfqq(bfqd, bfqq,
@@ -3366,6 +3369,8 @@ bfq_setup_cooperator(struct bfq_data *bfqd, struct bfq_queue *bfqq,
 static void bfq_bfqq_save_state(struct bfq_queue *bfqq)
 {
 	struct bfq_io_cq *bic = bfqq->bic;
+	/* State must be saved for the right queue index. */
+	unsigned int a_idx = bfqq->actuator_idx;
 
 	/*
 	 * If !bfqq->bic, the queue is already shared or its requests
@@ -3375,19 +3380,19 @@ static void bfq_bfqq_save_state(struct bfq_queue *bfqq)
 	if (!bic)
 		return;
 
-	bic->saved_last_serv_time_ns = bfqq->last_serv_time_ns;
-	bic->saved_inject_limit = bfqq->inject_limit;
-	bic->saved_decrease_time_jif = bfqq->decrease_time_jif;
+	bic->saved_last_serv_time_ns[a_idx] = bfqq->last_serv_time_ns;
+	bic->saved_inject_limit[a_idx] = bfqq->inject_limit;
+	bic->saved_decrease_time_jif[a_idx] = bfqq->decrease_time_jif;
 
-	bic->saved_weight = bfqq->entity.orig_weight;
-	BFQ_BUG_ON(bic->saved_weight == 0);
-	bic->saved_ttime = bfqq->ttime;
-	bic->saved_has_short_ttime = bfq_bfqq_has_short_ttime(bfqq);
-	bic->saved_IO_bound = bfq_bfqq_IO_bound(bfqq);
-	bic->saved_io_start_time = bfqq->io_start_time;
-	bic->saved_tot_idle_time = bfqq->tot_idle_time;
-	bic->saved_in_large_burst = bfq_bfqq_in_large_burst(bfqq);
-	bic->was_in_burst_list = !hlist_unhashed(&bfqq->burst_list_node);
+	bic->saved_weight[a_idx] = bfqq->entity.orig_weight;
+	BFQ_BUG_ON(bic->saved_weight[a_idx] == 0);
+	bic->saved_ttime[a_idx] = bfqq->ttime;
+	bic->saved_has_short_ttime[a_idx] = bfq_bfqq_has_short_ttime(bfqq);
+	bic->saved_IO_bound[a_idx] = bfq_bfqq_IO_bound(bfqq);
+	bic->saved_io_start_time[a_idx] = bfqq->io_start_time;
+	bic->saved_tot_idle_time[a_idx] = bfqq->tot_idle_time;
+	bic->saved_in_large_burst[a_idx] = bfq_bfqq_in_large_burst(bfqq);
+	bic->was_in_burst_list[a_idx] = !hlist_unhashed(&bfqq->burst_list_node);
 	if (unlikely(bfq_bfqq_just_created(bfqq) &&
 		     !bfq_bfqq_in_large_burst(bfqq) &&
 		     bfqq->bfqd->low_latency)) {
@@ -3400,17 +3405,17 @@ static void bfq_bfqq_save_state(struct bfq_queue *bfqq)
 		 * to bfqq, so that to avoid that bfqq unjustly fails
 		 * to enjoy weight raising if split soon.
 		 */
-		bic->saved_wr_coeff = bfqq->bfqd->bfq_wr_coeff;
-		bic->saved_wr_start_at_switch_to_srt = bfq_smallest_from_now();
-		bic->saved_wr_cur_max_time = bfq_wr_duration(bfqq->bfqd);
-		bic->saved_last_wr_start_finish = jiffies;
+		bic->saved_wr_coeff[a_idx] = bfqq->bfqd->bfq_wr_coeff;
+		bic->saved_wr_start_at_switch_to_srt[a_idx] = bfq_smallest_from_now();
+		bic->saved_wr_cur_max_time[a_idx] = bfq_wr_duration(bfqq->bfqd);
+		bic->saved_last_wr_start_finish[a_idx] = jiffies;
 	} else {
-		bic->saved_wr_coeff = bfqq->wr_coeff;
-		bic->saved_wr_start_at_switch_to_srt =
+		bic->saved_wr_coeff[a_idx] = bfqq->wr_coeff;
+		bic->saved_wr_start_at_switch_to_srt[a_idx] =
 			bfqq->wr_start_at_switch_to_srt;
-		bic->saved_service_from_wr = bfqq->service_from_wr;
-		bic->saved_last_wr_start_finish = bfqq->last_wr_start_finish;
-		bic->saved_wr_cur_max_time = bfqq->wr_cur_max_time;
+		bic->saved_service_from_wr[a_idx] = bfqq->service_from_wr;
+		bic->saved_last_wr_start_finish[a_idx] = bfqq->last_wr_start_finish;
+		bic->saved_wr_cur_max_time[a_idx] = bfqq->wr_cur_max_time;
 	}
 
 	BFQ_BUG_ON(time_is_after_jiffies(bfqq->last_wr_start_finish));
@@ -6118,15 +6123,18 @@ static void bfq_exit_icq(struct io_cq *icq)
 		spin_lock_irqsave(&bfqd->lock, flags);
 
 	for (act_idx = 0; act_idx < BFQ_NUM_ACTUATORS; act_idx++) {
-		if (bic->stable_merge_bfqq) {
-			BFQ_BUG_ON(bic->stable_merge_bfqq ==
+		struct bfq_queue *stable_merge_bfqq =
+			bic->stable_merge_bfqq[act_idx];
+
+		if (stable_merge_bfqq) {
+			BFQ_BUG_ON(stable_merge_bfqq ==
 				   bic_to_bfqq(bic, false, act_idx));
 
-			BFQ_BUG_ON(bfqd &&  bic->stable_merge_bfqq ==
+			BFQ_BUG_ON(bfqd &&  stable_merge_bfqq ==
 				   bic_to_bfqq(bic, true, act_idx) &&
-				   bic->stable_merge_bfqq->ref == 1);
+				   stable_merge_bfqq->ref == 1);
 
-			bfq_put_stable_ref(bic->stable_merge_bfqq);
+			bfq_put_stable_ref(stable_merge_bfqq);
 		}
 
 		bfq_exit_icq_bfqq(bic, true, act_idx);
@@ -6324,6 +6332,7 @@ bfq_do_early_stable_merge(struct bfq_data *bfqd, struct bfq_queue *bfqq,
 			  struct bfq_io_cq *bic,
 			  struct bfq_queue *last_bfqq_created)
 {
+	unsigned int a_idx = last_bfqq_created->actuator_idx;
 	struct bfq_queue *new_bfqq =
 		bfq_setup_merge(bfqq, last_bfqq_created);
 
@@ -6334,8 +6343,8 @@ bfq_do_early_stable_merge(struct bfq_data *bfqd, struct bfq_queue *bfqq,
 	}
 
 	if (new_bfqq->bic)
-		new_bfqq->bic->stably_merged = true;
-	bic->stably_merged = true;
+		new_bfqq->bic->stably_merged[a_idx] = true;
+	bic->stably_merged[a_idx] = true;
 	BFQ_BUG_ON(new_bfqq == bfqq);
 
 	bfq_log_bfqq(bfqd, bfqq,
@@ -6358,7 +6367,7 @@ bfq_do_early_stable_merge(struct bfq_data *bfqd, struct bfq_queue *bfqq,
 	bfqq->bic = bic;
 	bfq_merge_bfqqs(bfqd, bic, bfqq, new_bfqq);
 
-	BFQ_BUG_ON(bic->saved_weight == 0);
+	BFQ_BUG_ON(bic->saved_weight[a_idx] == 0);
 	BFQ_BUG_ON(new_bfqq->entity.weight == 0);
 	BFQ_BUG_ON(new_bfqq->entity.new_weight == 0);
 	bfq_log_bfqq(bfqd, new_bfqq,
@@ -6511,7 +6520,8 @@ static struct bfq_queue *bfq_do_or_sched_stable_merge(struct bfq_data *bfqd,
 			/*
 			 * Record the bfqq to merge to.
 			 */
-			bic->stable_merge_bfqq = last_bfqq_created;
+			bic->stable_merge_bfqq[last_bfqq_created->actuator_idx]
+							   = last_bfqq_created;
 			bfq_log_bfqq(bfqd, bfqq, "scheduled stable merge with bfq%d",
 				     bfq_get_first_task_pid(last_bfqq_created));
 		}
@@ -7036,12 +7046,18 @@ static void bfq_insert_request(struct blk_mq_hw_ctx *hctx, struct request *rq,
 		rq->rq_flags |= RQF_DISP_LIST;
 		if (bfqq)
 			bfq_log_bfqq(bfqd, bfqq,
-				     "%p in disp: at_head %d",
-				     rq, at_head);
+"%p in disp: at_head %d serv_q %p tot_busy_qs %u busy_q %d waker_q %p serv_q_waker %p",
+				     rq, at_head, bfqd->in_service_queue,
+				     bfq_tot_busy_queues(bfqd),
+				     bfq_bfqq_busy(bfqq),
+				     bfqq->waker_bfqq,
+				     bfqd->in_service_queue->waker_bfqq);
 		else
 			bfq_log(bfqd,
-				"%p in disp: at_head %d",
-				rq, at_head);
+	     "%p in disp: at_head %d serv_q %p tot_busy_qs %u serv_q_waker %p",
+				rq, at_head, bfqd->in_service_queue,
+				bfq_tot_busy_queues(bfqd),
+				bfqd->in_service_queue->waker_bfqq);
 	} else {
 		BFQ_BUG_ON(!bfqq);
 		BFQ_BUG_ON(!(rq->rq_flags & RQF_GOT));
@@ -7620,12 +7636,12 @@ static struct bfq_queue *bfq_get_bfqq_handle_split(struct bfq_data *bfqd,
 			     "get_request: was_in_list %d "
 			     "was_in_large_burst %d "
 			     "large burst in progress %d",
-			     bic->was_in_burst_list,
-			     bic->saved_in_large_burst,
+			     bic->was_in_burst_list[act_idx],
+			     bic->saved_in_large_burst[act_idx],
 			     bfqd->large_burst);
 
-		if ((bic->was_in_burst_list && bfqd->large_burst) ||
-		    bic->saved_in_large_burst) {
+		if ((bic->was_in_burst_list[act_idx] && bfqd->large_burst) ||
+		    bic->saved_in_large_burst[act_idx]) {
 			bfq_log_bfqq(bfqd, bfqq,
 				     "get_request: marking in "
 				     "large burst");
@@ -7635,7 +7651,7 @@ static struct bfq_queue *bfq_get_bfqq_handle_split(struct bfq_data *bfqd,
 				     "get_request: clearing in "
 				     "large burst");
 			bfq_clear_bfqq_in_large_burst(bfqq);
-			if (bic->was_in_burst_list)
+			if (bic->was_in_burst_list[act_idx])
 				/*
 				 * If bfqq was in the current
 				 * burst list before being
@@ -7724,6 +7740,7 @@ static struct bfq_queue *bfq_init_rq(struct request *rq)
 	struct bfq_queue *bfqq;
 	bool new_queue = false;
 	bool bfqq_already_existing = false, split = false;
+	unsigned int a_idx = bfq_actuator_index(bfqd, bio);
 
 	if (unlikely(!rq->elv.icq))
 		return NULL;
@@ -7755,7 +7772,7 @@ static struct bfq_queue *bfq_init_rq(struct request *rq)
 	if (likely(!new_queue)) {
 		/* If the queue was seeky for too long, break it apart. */
 		if (bfq_bfqq_coop(bfqq) && bfq_bfqq_split_coop(bfqq) &&
-			!bic->stably_merged) {
+			!bic->stably_merged[a_idx]) {
 			struct bfq_queue *old_bfqq = bfqq;
 
 			BFQ_BUG_ON(bfqq == &bfqd->oom_bfqq);
@@ -7764,7 +7781,7 @@ static struct bfq_queue *bfq_init_rq(struct request *rq)
 
 			/* Update bic before losing reference to bfqq */
 			if (bfq_bfqq_in_large_burst(bfqq))
-				bic->saved_in_large_burst = true;
+				bic->saved_in_large_burst[a_idx] = true;
 
 			bfqq = bfq_split_bfqq(bic, bfqq);
 			split = true;
