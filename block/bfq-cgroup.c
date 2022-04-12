@@ -748,33 +748,37 @@ static struct bfq_group *__bfq_bic_change_cgroup(struct bfq_data *bfqd,
 						struct bfq_io_cq *bic,
 						struct blkcg *blkcg)
 {
-	struct bfq_queue *async_bfqq = bic_to_bfqq(bic, 0);
-	struct bfq_queue *sync_bfqq = bic_to_bfqq(bic, 1);
 	struct bfq_group *bfqg;
 	struct bfq_entity *entity;
+	unsigned int act_idx;
 
 	bfqg = bfq_find_set_group(bfqd, blkcg);
 
 	if (unlikely(!bfqg))
 		bfqg = bfqd->root_group;
 
-	if (async_bfqq) {
-		entity = &async_bfqq->entity;
+	for (act_idx = 0; act_idx < BFQ_NUM_ACTUATORS; act_idx++) {
+		struct bfq_queue *async_bfqq = bic_to_bfqq(bic, 0, act_idx);
+		struct bfq_queue *sync_bfqq = bic_to_bfqq(bic, 1, act_idx);
 
-		if (entity->sched_data != &bfqg->sched_data) {
-			bic_set_bfqq(bic, NULL, 0);
-			bfq_log_bfqq(bfqd, async_bfqq,
-				     "%p %d",
-				     async_bfqq,
-				     async_bfqq->ref);
-			bfq_release_process_ref(bfqd, async_bfqq);
+		if (async_bfqq) {
+			entity = &async_bfqq->entity;
+
+			if (entity->sched_data != &bfqg->sched_data) {
+				bic_set_bfqq(bic, NULL, 0, act_idx);
+				bfq_log_bfqq(bfqd, async_bfqq,
+					     "%p %d",
+					     async_bfqq,
+					     async_bfqq->ref);
+				bfq_release_process_ref(bfqd, async_bfqq);
+			}
 		}
-	}
 
-	if (sync_bfqq) {
-		entity = &sync_bfqq->entity;
-		if (entity->sched_data != &bfqg->sched_data)
-			bfq_bfqq_move(bfqd, sync_bfqq, bfqg);
+		if (sync_bfqq) {
+			entity = &sync_bfqq->entity;
+			if (entity->sched_data != &bfqg->sched_data)
+				bfq_bfqq_move(bfqd, sync_bfqq, bfqg);
+		}
 	}
 
 	return bfqg;
