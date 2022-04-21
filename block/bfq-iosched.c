@@ -7725,8 +7725,10 @@ static struct bfq_queue *bfq_get_bfqq_handle_split(struct bfq_data *bfqd,
 	if (new_queue)
 		*new_queue = true;
 
-	if (bfqq)
+	if (bfqq) {
+		bfqq->proc_ref--;
 		bfq_put_queue(bfqq);
+	}
 	bfqq = bfq_get_queue(bfqd, bio, is_sync, bic, split);
 	BFQ_BUG_ON(split && !hlist_unhashed(&bfqq->burst_list_node));
 
