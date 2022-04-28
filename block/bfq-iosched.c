@@ -692,7 +692,7 @@ static void bfq_limit_depth(unsigned int op, struct blk_mq_alloc_data *data)
 		limit = (limit * depth) >> bfqd->full_depth_shift;
 	}
 
-	for (act_idx = 0; act_idx < BFQ_NUM_ACTUATORS; act_idx++) {
+	for (act_idx = 0; act_idx < bfqd->num_ia_ranges; act_idx++) {
 		struct bfq_queue *bfqq =
 			bic ? bic_to_bfqq(bic, op_is_sync(op), act_idx) : NULL;
 
@@ -2627,7 +2627,7 @@ unsigned int get_tot_req(struct bfq_data *bfqd)
 {
 	unsigned int tot = 0, i;
 
-	for (i = 0; i < BFQ_NUM_ACTUATORS; i++)
+	for (i = 0; i < bfqd->num_ia_ranges; i++)
 		tot += bfqd->rq_in_driver[i];
 	return tot;
 }
@@ -2748,10 +2748,23 @@ static void bfq_remove_request(struct request_queue *q,
 /* get the index of the actuator that will serve bio */
 static unsigned int bfq_actuator_index(struct bfq_data *bfqd, struct bio *bio)
 {
-	/*
-	 * Multi-actuator support not complete yet, so always return 0
-	 * for the moment.
-	 */
+	struct blk_independent_access_range *iar;
+	unsigned int i;
+	sector_t end;
+
+	if (bfqd->num_ia_ranges == 1)
+		return 0;
+
+	end = bio_end_sector(bio);
+
+	for (i = 0; i < bfqd->num_ia_ranges; i++) {
+		iar = &(bfqd->ia_ranges[i]);
+		if (end >= iar->sector && end < iar->sector + iar->nr_sectors)
+			return i;
+	}
+
+	pr_warn("bfq_actuator_index: bio last sector outside of access ranges"
+			"end=%lld\n", end);
 	return 0;
 }
 
@@ -2981,7 +2994,7 @@ void bfq_end_wr_async_queues(struct bfq_data *bfqd,
 {
 	int i, j, k;
 
-	for (k = 0; k < BFQ_NUM_ACTUATORS; k++) {
+	for (k = 0; k < bfqd->num_ia_ranges; k++) {
 		for (i = 0; i < 2; i++)
 			for (j = 0; j < IOPRIO_NR_LEVELS; j++)
 				if (bfqg->async_bfqq[i][j][k])
@@ -2998,7 +3011,7 @@ static void bfq_end_wr(struct bfq_data *bfqd)
 
 	spin_lock_irq(&bfqd->lock);
 
-	for (i = 0; i < BFQ_NUM_ACTUATORS; i++) {
+	for (i = 0; i < bfqd->num_ia_ranges; i++) {
 		list_for_each_entry(bfqq, &bfqd->active_list[i], bfqq_list)
 			bfq_bfqq_end_wr(bfqq);
 	}
@@ -5247,7 +5260,7 @@ bfq_choose_bfqq_for_injection(struct bfq_data *bfqd)
 	 *   (and re-added only if it gets new requests, but then it
 	 *   is assigned again enough budget for its new backlog).
 	 */
-	for (i = 0; i < BFQ_NUM_ACTUATORS; i++) {
+	for (i = 0; i < bfqd->num_ia_ranges; i++) {
 		list_for_each_entry(bfqq, &bfqd->active_list[i], bfqq_list)
 			if (!RB_EMPTY_ROOT(&bfqq->sort_list) &&
 				(in_serv_always_inject || bfqq->wr_coeff > 1) &&
@@ -5336,9 +5349,9 @@ struct bfq_queue *bfq_find_bfqq_for_underused_actuator(struct bfq_data *bfqd)
 {
 	int i;
 
-	for (i = 0 ; i < BFQ_NUM_ACTUATORS; i++)
+	for (i = 0 ; i < bfqd->num_ia_ranges; i++)
 		if (bfqd->rq_in_driver[i] < bfqd->actuator_load_threshold &&
-		    (i == BFQ_NUM_ACTUATORS - 1 ||
+		    (i == bfqd->num_ia_ranges - 1 ||
 		     bfqd->rq_in_driver[i] < bfqd->rq_in_driver[i+1])) {
 			struct bfq_queue *bfqq =
 				bfq_find_active_bfqq_for_actuator(bfqd, i);
@@ -6208,7 +6221,7 @@ static void bfq_exit_icq(struct io_cq *icq)
 	if (bfqd)
 		spin_lock_irqsave(&bfqd->lock, flags);
 
-	for (act_idx = 0; act_idx < BFQ_NUM_ACTUATORS; act_idx++) {
+	for (act_idx = 0; act_idx < bfqd->num_ia_ranges; act_idx++) {
 		struct bfq_queue *stable_merge_bfqq =
 			bic->stable_merge_bfqq[act_idx];
 
@@ -8079,7 +8092,7 @@ void bfq_put_async_queues(struct bfq_data *bfqd, struct bfq_group *bfqg)
 {
 	int i, j, k;
 
-	for (k = 0; k < BFQ_NUM_ACTUATORS; k++) {
+	for (k = 0; k < bfqd->num_ia_ranges; k++) {
 		for (i = 0; i < 2; i++)
 			for (j = 0; j < IOPRIO_NR_LEVELS; j++)
 				__bfq_put_async_bfqq(bfqd, &bfqg->async_bfqq[i][j][k]);
@@ -8204,6 +8217,7 @@ static int bfq_init_queue(struct request_queue *q, struct elevator_type *e)
 {
 	struct bfq_data *bfqd;
 	struct elevator_queue *eq;
+	unsigned int i;
 
 	eq = elevator_alloc(q, e);
 	if (!eq)
@@ -8246,6 +8260,45 @@ static int bfq_init_queue(struct request_queue *q, struct elevator_type *e)
 	bfqd->oom_bfqq.entity.prio_changed = 1;
 
 	bfqd->queue = q;
+
+	/**
+	* If the disk supports multiple actuators, we copy the independent
+	* access ranges from the request queue structure.
+	*/
+	spin_lock_irq(&q->queue_lock);
+	if (q->ia_ranges)
+	{
+		/**
+		* Check if the disk ia_ranges size exceeds the current bfq
+		* actuator limit.
+		*/
+		if (q->ia_ranges->nr_ia_ranges > BFQ_MAX_ACTUATORS)
+		{
+			pr_crit("nr_ia_ranges exceeds BFQ_MAX_ACTUATORS: "
+				"nr_ia_ranges=%d, BFQ_MAX_ACTUATORS=%d\n",
+				q->ia_ranges->nr_ia_ranges, BFQ_MAX_ACTUATORS);
+			BUG();
+
+		} else
+		{
+			bfqd->num_ia_ranges = q->ia_ranges->nr_ia_ranges;
+			bfq_log(bfqd, "this drive supports %d actuators\n",
+				bfqd->num_ia_ranges);
+
+			for (i = 0; i < bfqd->num_ia_ranges; i++)
+			{
+				bfqd->ia_ranges[i] = q->ia_ranges->ia_range[i];
+				bfq_log(bfqd, "actuator %d serves sector range [%lld-%lld]\n",
+					i, bfqd->ia_ranges[i].sector,
+					bfqd->ia_ranges[i].sector+bfqd->ia_ranges[i].nr_sectors);
+			}
+		}
+	} else
+	{
+		bfq_log(bfqd, "this drive does not support multiple actuators\n");
+		bfqd->num_ia_ranges = 1;
+	}
+	spin_unlock_irq(&q->queue_lock);
 
 	INIT_LIST_HEAD(&bfqd->dispatch);
 
@@ -8388,7 +8441,7 @@ static ssize_t bfq_weights_show(struct elevator_queue *e, char *page)
 	spin_lock_irq(&bfqd->lock);
 
 	num_char += sprintf(page + num_char, "Active:\n");
-	for (i = 0; i < BFQ_NUM_ACTUATORS; i++) {
+	for (i = 0; i < bfqd->num_ia_ranges; i++) {
 		list_for_each_entry(bfqq, &bfqd->active_list[i], bfqq_list) {
 			num_char += sprintf(page + num_char,
 						"pid%d: weight %hu, nr_queued %d %d, ",
