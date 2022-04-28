@@ -383,9 +383,6 @@ static const unsigned long bfq_late_stable_merging = 600;
 #define RQ_BIC(rq)		icq_to_bic((rq)->elv.priv[0])
 #define RQ_BFQQ(rq)		((rq)->elv.priv[1])
 
-/* Dual actuator split value */
-static const sector_t dual_act_split = 13672382463;
-
 struct bfq_queue *bic_to_bfqq(struct bfq_io_cq *bic,
 			      bool is_sync,
 			      unsigned int actuator_idx)
@@ -2751,18 +2748,11 @@ static void bfq_remove_request(struct request_queue *q,
 /* get the index of the actuator that will serve bio */
 static unsigned int bfq_actuator_index(struct bfq_data *bfqd, struct bio *bio)
 {
-	sector_t end = bio_end_sector(bio);
-
-	if (end <= dual_act_split) {
-		bfq_log(bfqd,
-			"end_sector %llu da_split %llu index %u",
-			end, dual_act_split, 0);
-		return 0;
-	} else {
-		bfq_log(bfqd, "end_sector %llu da_split %llu index %u",
-		end, dual_act_split, 1);
-		return 1;
-	}
+	/*
+	 * Multi-actuator support not complete yet, so always return 0
+	 * for the moment.
+	 */
+	return 0;
 }
 
 static bool bfq_bio_merge(struct request_queue *q, struct bio *bio,
